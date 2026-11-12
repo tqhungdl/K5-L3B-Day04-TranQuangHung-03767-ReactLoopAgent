@@ -12,6 +12,10 @@ CONFIG = {
 }
 
 
+class ProviderError(RuntimeError):
+    """An error whose message is safe to include in the agent trace."""
+
+
 def post_json(url, headers, payload):
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json', **headers})
     try:
@@ -19,9 +23,18 @@ def post_json(url, headers, payload):
             return json.load(response)
     except urllib.error.HTTPError as exc:
         # Do not print response bodies: they may contain account or request data.
-        raise RuntimeError(f'Provider trả HTTP {exc.code}; kiểm tra model, key và quota.') from exc
+        hints = {
+            400: 'Check the model ID, tool-calling support, and request parameters.',
+            401: 'API key is invalid or expired; check the key for the selected provider.',
+            402: 'Insufficient credits; check the provider account balance.',
+            403: 'Access denied; check model permissions and account restrictions.',
+            404: 'Model or endpoint not found; check the full provider model ID.',
+            429: 'Rate limit or quota exceeded; check quota and retry later.',
+        }
+        hint = hints.get(exc.code, 'Check provider availability, model, and account quota.')
+        raise ProviderError(f'Provider returned HTTP {exc.code}. {hint}') from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f'Không kết nối được provider: {exc.reason}') from exc
+        raise ProviderError('Cannot connect to provider; check network, proxy, and TLS settings.') from exc
 
 
 class Provider:
